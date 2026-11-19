@@ -29,7 +29,14 @@
 - **CRITICAL RULE - Demo endpoints only:** no real Active Directory, laptops or customer systems. Actions run against a fake endpoint inside the same Cloud Run service.
 - **CRITICAL RULE - Secrets:** never put API keys in code or commit them. Read them from environment variables or Secret Manager.
 
-## 5. How to work in this repo
+## 5. Build priority (one-day build, submission tonight)
+- **Build only Moment 1:** employee page (mic + share one window) → Gemini Live reads the error → `match_runbook` finds the VPN Error 809 skill → `request_approval` in the L1 console → `execute_action` runs a simulated fix → audit record in Firestore.
+- **Order:** (1) employee page, (2) Gemini Live talking and reading the screen, (3) VPN runbook as an Agent Skill, (4) `match_runbook`, (5) L1 console with approve button, (6) simulated fix + audit record.
+- **Fallback:** if live streaming is unreliable, add a "upload screenshot" mode that uses the same agent and runbook.
+- **Only if Moment 1 works:** SOP ingest (paste SOP text → Gemini writes a new runbook skill).
+- **Not now:** escalation tickets, audit dashboard, multi-tenant admin, auth, BigQuery.
+
+## 6. How to work in this repo
 - Make one small change at a time, then explain it line by line.
 - Ask before running any `gcloud`, deploy, delete or billing command.
 - After each working step, suggest a git commit message.
