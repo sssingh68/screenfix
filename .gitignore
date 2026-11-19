@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables and secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*secret*
+*credential*.json
+service-account*.json
+
+# OS files
+.DS_Store
+Thumbs.db
