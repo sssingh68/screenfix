@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+
+from live import handle_live_session
 
 app = FastAPI(title="ScreenFix Backend")
 
@@ -18,4 +20,11 @@ def get_root():
 def health_check():
     """Health check endpoint to verify service uptime."""
     return {"status": "ok"}
+
+
+@app.websocket("/ws/live")
+async def websocket_live_endpoint(websocket: WebSocket):
+    """Bridge employee browser WebSocket to Gemini Live."""
+    await handle_live_session(websocket)
+
 

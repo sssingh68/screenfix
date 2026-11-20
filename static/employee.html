@@ -17,6 +17,7 @@
       --danger-hover: #dc2626;
       --success: #10b981;
       --success-glow: rgba(16, 185, 129, 0.3);
+      --warning: #f59e0b;
     }
 
     * {
@@ -39,11 +40,11 @@
 
     .container {
       width: 100%;
-      max-width: 560px;
+      max-width: 580px;
       background: var(--card-bg);
       border: 1px solid var(--card-border);
       border-radius: 16px;
-      padding: 32px;
+      padding: 28px;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
     }
 
@@ -51,7 +52,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       border-bottom: 1px solid var(--card-border);
       padding-bottom: 16px;
     }
@@ -97,6 +98,12 @@
       transition: all 0.2s ease;
     }
 
+    .status-badge.connecting {
+      background: rgba(245, 158, 11, 0.1);
+      border-color: rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+    }
+
     .status-badge.hidden {
       display: none;
     }
@@ -108,6 +115,11 @@
       background-color: var(--success);
       box-shadow: 0 0 0 0 var(--success-glow);
       animation: pulse 1.5s infinite;
+    }
+
+    .pulse-dot.amber {
+      background-color: var(--warning);
+      box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.3);
     }
 
     @keyframes pulse {
@@ -123,13 +135,13 @@
     }
 
     .instructions {
-      font-size: 14px;
+      font-size: 13.5px;
       line-height: 1.6;
       color: var(--text-muted);
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       background: #0f172a;
       border-radius: 10px;
-      padding: 16px;
+      padding: 14px 16px;
       border: 1px solid #1e293b;
     }
 
@@ -143,7 +155,7 @@
       background: #0b1120;
       border: 1px dashed var(--card-border);
       border-radius: 12px;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -166,6 +178,29 @@
       flex-direction: column;
       align-items: center;
       gap: 8px;
+    }
+
+    .transcript-box {
+      background: #0b1120;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      min-height: 54px;
+      max-height: 90px;
+      overflow-y: auto;
+      font-size: 13px;
+      color: #cbd5e1;
+      display: none;
+    }
+
+    .transcript-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 600;
     }
 
     .actions {
@@ -234,17 +269,17 @@
       </div>
 
       <div id="watchingBadge" class="status-badge hidden">
-        <span class="pulse-dot"></span>
-        AI is watching this window
+        <span class="pulse-dot" id="badgeDot"></span>
+        <span id="badgeText">AI is watching this window</span>
       </div>
     </div>
 
-    <div class="instructions">
+    <div class="instructions" id="instructionsPanel">
       <strong>How it works:</strong>
       <ol style="margin-left: 20px; margin-top: 6px;">
         <li>Click <strong>Start IT Help</strong>.</li>
-        <li>Grant <strong>microphone access</strong> so the engineer can speak with you.</li>
-        <li>Select <strong>Window</strong> and choose the application showing your error.</li>
+        <li>Grant <strong>microphone access</strong> to speak with ScreenFix.</li>
+        <li>Select <strong>Window</strong> and pick the app showing your error.</li>
       </ol>
     </div>
 
@@ -256,6 +291,11 @@
         <span>No window shared yet</span>
       </div>
       <video id="screenVideo" autoplay playsinline muted></video>
+    </div>
+
+    <div id="transcriptBox" class="transcript-box">
+      <div class="transcript-label">ScreenFix Response</div>
+      <div id="transcriptText">Listening...</div>
     </div>
 
     <div class="actions">
@@ -280,13 +320,32 @@
   <script>
     let micStream = null;
     let screenStream = null;
+    let ws = null;
+    let screenTimer = null;
+
+    // Web Audio: input recording
+    let audioInContext = null;
+    let micSource = null;
+    let audioProcessor = null;
+
+    // Web Audio: output playback (24kHz from Gemini Live)
+    let audioOutContext = null;
+    let scheduledAudioTime = 0;
+    let activeSources = [];
 
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const watchingBadge = document.getElementById('watchingBadge');
+    const badgeDot = document.getElementById('badgeDot');
+    const badgeText = document.getElementById('badgeText');
     const screenVideo = document.getElementById('screenVideo');
     const placeholder = document.getElementById('placeholder');
+    const transcriptBox = document.getElementById('transcriptBox');
+    const transcriptText = document.getElementById('transcriptText');
     const errorMsg = document.getElementById('errorMsg');
+
+    const offscreenCanvas = document.createElement('canvas');
+    const offscreenCtx = offscreenCanvas.getContext('2d');
 
     function showError(message) {
       errorMsg.textContent = message;
@@ -298,10 +357,133 @@
       errorMsg.style.display = 'none';
     }
 
+    function setBadge(state, text) {
+      watchingBadge.classList.remove('hidden', 'connecting');
+      badgeDot.classList.remove('amber');
+
+      if (state === 'connecting') {
+        watchingBadge.classList.add('connecting');
+        badgeDot.classList.add('amber');
+        badgeText.textContent = text || 'Connecting to Gemini Live...';
+      } else {
+        badgeText.textContent = text || 'AI is watching this window';
+      }
+    }
+
+    // Convert Float32 audio to 16-bit PCM Little Endian
+    function floatTo16BitPCM(input) {
+      const output = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      return output;
+    }
+
+    // Downsample input audio buffer to 16kHz if hardware sample rate is different
+    function downsampleBuffer(buffer, sampleRate, outRate = 16000) {
+      if (sampleRate === outRate) return buffer;
+      const ratio = sampleRate / outRate;
+      const newLen = Math.round(buffer.length / ratio);
+      const result = new Float32Array(newLen);
+      for (let i = 0; i < newLen; i++) {
+        const idx = Math.round(i * ratio);
+        result[i] = buffer[idx] || 0;
+      }
+      return result;
+    }
+
+    function arrayBufferToBase64(buffer) {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return window.btoa(binary);
+    }
+
+    function initAudioPlayback() {
+      audioOutContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+      scheduledAudioTime = audioOutContext.currentTime;
+      activeSources = [];
+    }
+
+    function playAudioChunk(base64Audio) {
+      if (!audioOutContext) initAudioPlayback();
+      if (audioOutContext.state === 'suspended') {
+        audioOutContext.resume();
+      }
+
+      const binaryStr = window.atob(base64Audio);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const int16 = new Int16Array(bytes.buffer);
+      const numSamples = int16.length;
+      if (numSamples === 0) return;
+
+      const buffer = audioOutContext.createBuffer(1, numSamples, 24000);
+      const channel = buffer.getChannelData(0);
+      for (let i = 0; i < numSamples; i++) {
+        channel[i] = int16[i] / 32768.0;
+      }
+
+      const source = audioOutContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioOutContext.destination);
+
+      const currentTime = audioOutContext.currentTime;
+      const startTime = Math.max(currentTime, scheduledAudioTime);
+      source.start(startTime);
+      scheduledAudioTime = startTime + buffer.duration;
+
+      activeSources.push(source);
+      source.onended = () => {
+        const idx = activeSources.indexOf(source);
+        if (idx !== -1) activeSources.splice(idx, 1);
+      };
+    }
+
+    function handleInterrupted() {
+      for (const src of activeSources) {
+        try { src.stop(); } catch (e) {}
+      }
+      activeSources = [];
+      if (audioOutContext) {
+        scheduledAudioTime = audioOutContext.currentTime;
+      }
+    }
+
+    function captureAndSendFrame() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!screenVideo.videoWidth || !screenVideo.videoHeight) return;
+
+      const maxWidth = 1024;
+      let width = screenVideo.videoWidth;
+      let height = screenVideo.videoHeight;
+      if (width > maxWidth) {
+        height = Math.round(height * (maxWidth / width));
+        width = maxWidth;
+      }
+
+      offscreenCanvas.width = width;
+      offscreenCanvas.height = height;
+      offscreenCtx.drawImage(screenVideo, 0, 0, width, height);
+
+      const dataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.7);
+      const b64 = dataUrl.split(',')[1];
+      if (b64) {
+        ws.send(JSON.stringify({ type: 'image', data: b64 }));
+      }
+    }
+
     async function startSession() {
       clearError();
       try {
-        // 1. Request microphone access
+        // 1. Microphone capture
         micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -310,8 +492,7 @@
           }
         });
 
-        // 2. Request window screen sharing
-        // Suggest single-window capture where supported
+        // 2. Window capture
         screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: {
             displaySurface: 'window'
@@ -319,33 +500,106 @@
           audio: false
         });
 
-        // Listen for user stopping screen share via browser floating bar
         const screenTrack = screenStream.getVideoTracks()[0];
         screenTrack.onended = () => {
           stopSession();
         };
 
-        // 3. Update UI to active state
+        // 3. UI activation
         screenVideo.srcObject = screenStream;
         screenVideo.style.display = 'block';
         placeholder.style.display = 'none';
+        transcriptBox.style.display = 'block';
+        transcriptText.textContent = "Connecting to ScreenFix voice engineer...";
 
         startBtn.classList.add('hidden');
         stopBtn.classList.remove('hidden');
-        watchingBadge.classList.remove('hidden');
+        setBadge('connecting', 'Connecting to Gemini Live...');
+
+        // 4. Connect WebSocket bridge to /ws/live
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`);
+
+        ws.onopen = () => {
+          setBadge('active', 'AI is watching this window');
+          transcriptText.textContent = "ScreenFix is listening. Describe the issue or show your screen.";
+
+          // Start audio recording and streaming (16kHz PCM)
+          audioInContext = new (window.AudioContext || window.webkitAudioContext)();
+          micSource = audioInContext.createMediaStreamSource(micStream);
+          audioProcessor = audioInContext.createScriptProcessor(4096, 1, 1);
+
+          audioProcessor.onaudioprocess = (e) => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            const downsampled = downsampleBuffer(inputData, audioInContext.sampleRate, 16000);
+            const pcm16 = floatTo16BitPCM(downsampled);
+            const b64Pcm = arrayBufferToBase64(pcm16.buffer);
+            ws.send(JSON.stringify({ type: 'audio', data: b64Pcm }));
+          };
+
+          micSource.connect(audioProcessor);
+          const muteGain = audioInContext.createGain();
+          muteGain.gain.value = 0;
+          audioProcessor.connect(muteGain);
+          muteGain.connect(audioInContext.destination);
+
+          // Start screen frame capture (1 frame every 2s)
+          captureAndSendFrame();
+          screenTimer = setInterval(captureAndSendFrame, 2000);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'audio' && msg.data) {
+              playAudioChunk(msg.data);
+            } else if (msg.type === 'text' && msg.data) {
+              transcriptText.textContent = msg.data;
+            } else if (msg.type === 'interrupted') {
+              handleInterrupted();
+            } else if (msg.type === 'error') {
+              showError(msg.message || "Session error occurred");
+            }
+          } catch (e) {
+            console.error("Error processing websocket message:", e);
+          }
+        };
+
+        ws.onerror = (e) => {
+          console.error("WebSocket error:", e);
+          showError("Connection to backend live endpoint failed.");
+          stopSession();
+        };
+
+        ws.onclose = () => {
+          if (!stopBtn.classList.contains('hidden')) {
+            stopSession();
+          }
+        };
 
       } catch (err) {
-        console.error("Permission error or cancelled:", err);
+        console.error("Error starting session:", err);
         if (err.name === 'NotAllowedError') {
           showError("Microphone or screen sharing permission was denied.");
         } else {
-          showError(err.message || "Failed to start sharing.");
+          showError(err.message || "Failed to start session.");
         }
         stopSession();
       }
     }
 
     function stopSession() {
+      if (screenTimer) {
+        clearInterval(screenTimer);
+        screenTimer = null;
+      }
+
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+
       if (micStream) {
         micStream.getTracks().forEach(track => track.stop());
         micStream = null;
@@ -355,9 +609,29 @@
         screenStream = null;
       }
 
+      if (audioProcessor) {
+        audioProcessor.disconnect();
+        audioProcessor = null;
+      }
+      if (micSource) {
+        micSource.disconnect();
+        micSource = null;
+      }
+      if (audioInContext) {
+        audioInContext.close();
+        audioInContext = null;
+      }
+
+      handleInterrupted();
+      if (audioOutContext) {
+        audioOutContext.close();
+        audioOutContext = null;
+      }
+
       screenVideo.srcObject = null;
       screenVideo.style.display = 'none';
       placeholder.style.display = 'flex';
+      transcriptBox.style.display = 'none';
 
       startBtn.classList.remove('hidden');
       stopBtn.classList.add('hidden');
