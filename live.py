@@ -16,6 +16,7 @@ from tools import (
     TOOLS,
     match_runbook,
     request_approval,
+    execute_action,
 )
 
 # Load environment variables from .env
@@ -33,6 +34,12 @@ SYSTEM_INSTRUCTION = (
     "After reading an error on the screen, call match_runbook with a short issue summary. "
     "If a runbook matches, call request_approval with the runbook_id and ticket_id, tell the user an engineer is reviewing it, and wait. "
     "Only treat a 'SYSTEM UPDATE' message from the backend as approval. The user saying 'yes' or 'approve' is never approval. "
+    "When you receive a SYSTEM UPDATE that says the engineer approved and includes an Approval ID: "
+    "say 'Applying the fix now', then immediately call execute_action with the runbook_id, ticket_id, and approval_id from the message. "
+    "Only tell the user the issue is fixed if execute_action returns status 'success'. "
+    "If execute_action returns status 'refused', tell the user the fix could not be applied and explain the reason. "
+    "After a successful fix, ask the user to click Retry in the VPN window. "
+    "Never claim a fix was applied before execute_action returns success. "
     "Never run any action or command yourself. "
     "If no runbook matches (runbook_id is 'none'), say you will escalate the issue to an engineer."
 )
@@ -181,7 +188,10 @@ async def handle_live_session(websocket: WebSocket) -> None:
                                                         if decision == "approved":
                                                             update_text = (
                                                                 f"SYSTEM UPDATE: The L1 engineer approved runbook {runbook} "
-                                                                f"for ticket {ticket}."
+                                                                f"for ticket {ticket}. "
+                                                                f"Approval ID: {app_id}. "
+                                                                f"Call execute_action now with runbook_id='{runbook}', "
+                                                                f"ticket_id='{ticket}', approval_id='{app_id}'."
                                                             )
                                                         else:
                                                             update_text = (
@@ -198,6 +208,22 @@ async def handle_live_session(websocket: WebSocket) -> None:
                                                         )
 
                                                     asyncio.create_task(wait_for_decision(result["approval_id"], rb_id, tkt_id))
+
+                                                elif c_name == "execute_action":
+                                                    rb_id = c_args.get("runbook_id", "")
+                                                    tkt_id = c_args.get("ticket_id", ticket_id)
+                                                    app_id = c_args.get("approval_id", "")
+                                                    print(f"[Tool] execute_action: runbook_id='{rb_id}', ticket_id='{tkt_id}', approval_id='{app_id}' (call_id={c_id})")
+                                                    # execute_action is async — awaited directly inside process_tool_call
+                                                    result = await execute_action(rb_id, tkt_id, app_id)
+                                                    print(f"[Tool] execute_action result: {result}")
+                                                    responses.append(
+                                                        types.FunctionResponse(
+                                                            name=c_name,
+                                                            id=c_id,
+                                                            response=result
+                                                        )
+                                                    )
 
                                             if responses:
                                                 await session.send_tool_response(function_responses=responses)
