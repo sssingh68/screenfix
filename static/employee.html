@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScreenFix — AI IT Support</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 560px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 9999px;
+      transition: all 0.2s ease;
+    }
+
+    .status-badge.hidden {
+      display: none;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success);
+      box-shadow: 0 0 0 0 var(--success-glow);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 var(--success-glow);
+      }
+      70% {
+        box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+    }
+
+    .instructions {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 16px;
+      border: 1px solid #1e293b;
+    }
+
+    .instructions strong {
+      color: var(--text);
+    }
+
+    .preview-box {
+      width: 100%;
+      height: 220px;
+      background: #0b1120;
+      border: 1px dashed var(--card-border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .preview-box video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+
+    .preview-placeholder {
+      color: var(--text-muted);
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 14px 20px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .btn-danger:hover {
+      background: var(--danger-hover);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .error-msg {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #f87171;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="brand">
+        <div class="logo-badge">⚡</div>
+        <div>
+          <h1>ScreenFix</h1>
+          <div class="subtitle">AI L1 Support Engineer</div>
+        </div>
+      </div>
+
+      <div id="watchingBadge" class="status-badge hidden">
+        <span class="pulse-dot"></span>
+        AI is watching this window
+      </div>
+    </div>
+
+    <div class="instructions">
+      <strong>How it works:</strong>
+      <ol style="margin-left: 20px; margin-top: 6px;">
+        <li>Click <strong>Start IT Help</strong>.</li>
+        <li>Grant <strong>microphone access</strong> so the engineer can speak with you.</li>
+        <li>Select <strong>Window</strong> and choose the application showing your error.</li>
+      </ol>
+    </div>
+
+    <div class="preview-box" id="previewContainer">
+      <div class="preview-placeholder" id="placeholder">
+        <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0H3" />
+        </svg>
+        <span>No window shared yet</span>
+      </div>
+      <video id="screenVideo" autoplay playsinline muted></video>
+    </div>
+
+    <div class="actions">
+      <button id="startBtn" class="btn btn-primary">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15a3 3 0 01-3-3V4.5a3 3 0 116 0V12a3 3 0 01-3 3z" />
+        </svg>
+        Start IT Help
+      </button>
+
+      <button id="stopBtn" class="btn btn-danger hidden">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+        End Call
+      </button>
+    </div>
+
+    <div id="errorMsg" class="error-msg"></div>
+  </div>
+
+  <script>
+    let micStream = null;
+    let screenStream = null;
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const watchingBadge = document.getElementById('watchingBadge');
+    const screenVideo = document.getElementById('screenVideo');
+    const placeholder = document.getElementById('placeholder');
+    const errorMsg = document.getElementById('errorMsg');
+
+    function showError(message) {
+      errorMsg.textContent = message;
+      errorMsg.style.display = 'block';
+    }
+
+    function clearError() {
+      errorMsg.textContent = '';
+      errorMsg.style.display = 'none';
+    }
+
+    async function startSession() {
+      clearError();
+      try {
+        // 1. Request microphone access
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+
+        // 2. Request window screen sharing
+        // Suggest single-window capture where supported
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: 'window'
+          },
+          audio: false
+        });
+
+        // Listen for user stopping screen share via browser floating bar
+        const screenTrack = screenStream.getVideoTracks()[0];
+        screenTrack.onended = () => {
+          stopSession();
+        };
+
+        // 3. Update UI to active state
+        screenVideo.srcObject = screenStream;
+        screenVideo.style.display = 'block';
+        placeholder.style.display = 'none';
+
+        startBtn.classList.add('hidden');
+        stopBtn.classList.remove('hidden');
+        watchingBadge.classList.remove('hidden');
+
+      } catch (err) {
+        console.error("Permission error or cancelled:", err);
+        if (err.name === 'NotAllowedError') {
+          showError("Microphone or screen sharing permission was denied.");
+        } else {
+          showError(err.message || "Failed to start sharing.");
+        }
+        stopSession();
+      }
+    }
+
+    function stopSession() {
+      if (micStream) {
+        micStream.getTracks().forEach(track => track.stop());
+        micStream = null;
+      }
+      if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+        screenStream = null;
+      }
+
+      screenVideo.srcObject = null;
+      screenVideo.style.display = 'none';
+      placeholder.style.display = 'flex';
+
+      startBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+      watchingBadge.classList.add('hidden');
+    }
+
+    startBtn.addEventListener('click', startSession);
+    stopBtn.addEventListener('click', stopSession);
+  </script>
+</body>
+</html>
