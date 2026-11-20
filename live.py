@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import os
+import traceback
 from dotenv import load_dotenv
 from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
@@ -44,7 +45,7 @@ async def handle_live_session(websocket: WebSocket) -> None:
     )
 
     config = types.LiveConnectConfig(
-        response_modalities=[types.LiveModality.AUDIO],
+        response_modalities=["AUDIO"],
         system_instruction=types.Content(
             parts=[types.Part.from_text(text=SYSTEM_INSTRUCTION)]
         ),
@@ -52,11 +53,23 @@ async def handle_live_session(websocket: WebSocket) -> None:
 
     try:
         async with client.aio.live.connect(model=MODEL_NAME, config=config) as session:
-            logger.info("Connected to Gemini Live session.")
+            print("[Gemini Live] Session connected successfully")
             await websocket.send_json({"type": "status", "status": "connected"})
+
+            # Send initial greeting prompt to test the response path without mic
+            print("[Gemini Live] Sending initial intro test turn...")
+            await session.send_client_content(
+                turns=[types.Content(
+                    role="user",
+                    parts=[types.Part(text="Say hello and introduce yourself in one short sentence.")]
+                )],
+                turn_complete=True
+            )
 
             async def browser_to_gemini():
                 """Reads audio PCM and screen JPEG frames from the browser and forwards to Gemini."""
+                audio_chunks_sent = 0
+                image_frames_sent = 0
                 try:
                     while True:
                         raw = await websocket.receive_text()
@@ -66,56 +79,80 @@ async def handle_live_session(websocket: WebSocket) -> None:
                         if msg_type == "audio":
                             audio_bytes = base64.b64decode(msg["data"])
                             await session.send_realtime_input(
-                                media=types.Blob(
+                                audio=types.Blob(
                                     data=audio_bytes,
                                     mime_type="audio/pcm;rate=16000"
                                 )
                             )
+                            audio_chunks_sent += 1
+                            if audio_chunks_sent % 50 == 0:
+                                print(f"[Browser -> Gemini] Sent {audio_chunks_sent} audio chunks ({len(audio_bytes)} bytes each)")
+
                         elif msg_type == "image":
                             image_bytes = base64.b64decode(msg["data"])
                             await session.send_realtime_input(
-                                media=types.Blob(
+                                video=types.Blob(
                                     data=image_bytes,
                                     mime_type="image/jpeg"
                                 )
                             )
+                            image_frames_sent += 1
+                            print(f"[Browser -> Gemini] Sent image frame #{image_frames_sent} ({len(image_bytes)} bytes)")
+
                 except (WebSocketDisconnect, asyncio.CancelledError):
-                    pass
+                    print("[Browser -> Gemini] Client disconnected or stream closed.")
                 except Exception as e:
-                    logger.warning(f"Error in browser_to_gemini: {e}")
+                    print(f"[Browser -> Gemini] EXCEPTION: {e}")
+                    traceback.print_exc()
 
             async def gemini_to_browser():
                 """Reads voice audio and responses from Gemini Live and streams them back to the browser."""
+                print("[Gemini Live] receive loop started")
                 try:
-                    async for response in session.receive():
-                        server_content = response.server_content
-                        if not server_content:
-                            continue
+                    while True:
+                        async for response in session.receive():
+                            server_content = response.server_content
+                            if not server_content:
+                                if response.tool_call:
+                                    print(f"[Gemini -> Browser] Received tool_call: {response.tool_call}")
+                                elif response.go_away:
+                                    print(f"[Gemini -> Browser] Received go_away: {response.go_away}")
+                                else:
+                                    print(f"[Gemini -> Browser] Received non-content message: {response}")
+                                continue
 
-                        model_turn = server_content.model_turn
-                        if model_turn:
-                            for part in model_turn.parts:
-                                if part.inline_data and part.inline_data.data:
-                                    audio_b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
-                                    await websocket.send_json({
-                                        "type": "audio",
-                                        "data": audio_b64,
-                                        "mime_type": part.inline_data.mime_type or "audio/pcm;rate=24000"
-                                    })
-                                if part.text:
-                                    await websocket.send_json({
-                                        "type": "text",
-                                        "data": part.text
-                                    })
+                            if server_content.turn_complete:
+                                print("[Gemini -> Browser] Received turn_complete=True")
 
-                        if server_content.interrupted:
-                            # User interrupted the model speech
-                            await websocket.send_json({"type": "interrupted"})
+                            if server_content.interrupted:
+                                print("[Gemini -> Browser] Received interrupted=True")
+                                await websocket.send_json({"type": "interrupted"})
+
+                            model_turn = server_content.model_turn
+                            if model_turn:
+                                for part in model_turn.parts:
+                                    if part.inline_data and part.inline_data.data:
+                                        print(f"[Gemini -> Browser] Received audio chunk ({len(part.inline_data.data)} bytes, mime={part.inline_data.mime_type})")
+                                        audio_b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
+                                        await websocket.send_json({
+                                            "type": "audio",
+                                            "data": audio_b64,
+                                            "mime_type": part.inline_data.mime_type or "audio/pcm;rate=24000"
+                                        })
+                                    if part.text:
+                                        print(f"[Gemini -> Browser] Received text: {part.text}")
+                                        await websocket.send_json({
+                                            "type": "text",
+                                            "data": part.text
+                                        })
+
+                        print("[Gemini Live] turn finished, waiting for next turn")
 
                 except (WebSocketDisconnect, asyncio.CancelledError):
-                    pass
+                    print("[Gemini -> Browser] Stream closed or client disconnected.")
                 except Exception as e:
-                    logger.warning(f"Error in gemini_to_browser: {e}")
+                    print(f"[Gemini -> Browser] EXCEPTION: {e}")
+                    traceback.print_exc()
 
             # Run upstream and downstream concurrently
             upstream = asyncio.create_task(browser_to_gemini())
@@ -129,9 +166,10 @@ async def handle_live_session(websocket: WebSocket) -> None:
                 task.cancel()
 
     except WebSocketDisconnect:
-        logger.info("Browser disconnected from live session.")
+        print("[Live Session] Browser closed WebSocket connection.")
     except Exception as e:
-        logger.error(f"Live session error: {e}")
+        print(f"[Live Session] Top-level EXCEPTION: {e}")
+        traceback.print_exc()
         try:
             await websocket.send_json({
                 "type": "error",
@@ -140,4 +178,4 @@ async def handle_live_session(websocket: WebSocket) -> None:
         except Exception:
             pass
     finally:
-        logger.info("Cleaned up live session.")
+        print("[Live Session] Cleaned up session.")
